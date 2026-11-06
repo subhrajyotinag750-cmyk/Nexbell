@@ -1,0 +1,60 @@
+name: Build NexBell Android APK
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      NEXBELL_API_TOKEN: ${{ secrets.NEXBELL_API_TOKEN }}
+      ONESIGNAL_APP_ID: ${{ secrets.ONESIGNAL_APP_ID }}
+    defaults:
+      run:
+        working-directory: artifacts/nexbell-android
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install dependencies
+        working-directory: .
+        run: pnpm install --frozen-lockfile
+
+      - name: Build web assets and sync Capacitor
+        run: |
+          pnpm run build:android:web
+          pnpm exec cap sync android
+
+      - name: Create signing key
+        working-directory: artifacts/nexbell-android/android
+        run: |
+          if [ -n "${{ secrets.KEYSTORE_BASE64 }}" ] && [ -n "${{ secrets.KEYSTORE_PASSWORD }}" ]; then
+            echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > nexbell-release.jks
+            printf 'storeFile=nexbell-release.jks\nstorePassword=%s\nkeyAlias=%s\nkeyPassword=%s\n' \
+              "${{ secrets.KEYSTORE_PASSWORD }}" "${{ secrets.KEY_ALIAS || 'nexbell' }}" "${{ secrets.KEY_PASSWORD || secrets.KEYSTORE_PASSWORD }}" > keystore.properties
+          else
+            bash make-keystore.sh
+          fi
+
+      - name: Build release APK
+        working-directory: artifacts/nexbell-android/android
+        run: ./gradlew --no-daemon assembleRelease
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nexbell-release-apk
+          path: artifacts/nexbell-android/android/app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
