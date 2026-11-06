@@ -9,13 +9,16 @@ jobs:
     env:
       NEXBELL_API_TOKEN: ${{ secrets.NEXBELL_API_TOKEN }}
       ONESIGNAL_APP_ID: ${{ secrets.ONESIGNAL_APP_ID }}
-    defaults:
-      run:
-        working-directory: artifacts/nexbell-android
+      KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+      KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+      KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+      KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
 
       - uses: pnpm/action-setup@v4
+        with:
+          version: 10
 
       - uses: actions/setup-node@v4
         with:
@@ -30,10 +33,10 @@ jobs:
       - uses: android-actions/setup-android@v3
 
       - name: Install dependencies
-        working-directory: .
         run: pnpm install --frozen-lockfile
 
       - name: Build web assets and sync Capacitor
+        working-directory: artifacts/nexbell-android
         run: |
           pnpm run build:android:web
           pnpm exec cap sync android
@@ -41,17 +44,19 @@ jobs:
       - name: Create signing key
         working-directory: artifacts/nexbell-android/android
         run: |
-          if [ -n "${{ secrets.KEYSTORE_BASE64 }}" ] && [ -n "${{ secrets.KEYSTORE_PASSWORD }}" ]; then
-            echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > nexbell-release.jks
+          if [ -n "$KEYSTORE_BASE64" ] && [ -n "$KEYSTORE_PASSWORD" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > nexbell-release.jks
             printf 'storeFile=nexbell-release.jks\nstorePassword=%s\nkeyAlias=%s\nkeyPassword=%s\n' \
-              "${{ secrets.KEYSTORE_PASSWORD }}" "${{ secrets.KEY_ALIAS || 'nexbell' }}" "${{ secrets.KEY_PASSWORD || secrets.KEYSTORE_PASSWORD }}" > keystore.properties
+              "$KEYSTORE_PASSWORD" "${KEY_ALIAS:-nexbell}" "${KEY_PASSWORD:-$KEYSTORE_PASSWORD}" > keystore.properties
           else
             bash make-keystore.sh
           fi
 
       - name: Build release APK
         working-directory: artifacts/nexbell-android/android
-        run: ./gradlew --no-daemon assembleRelease
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon assembleRelease
 
       - uses: actions/upload-artifact@v4
         with:
